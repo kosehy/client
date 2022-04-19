@@ -83,7 +83,7 @@ def parse_model(model_metadata, model_config):
     input_config = model_config.input[0]
     output_metadata = model_metadata.outputs[0]
 
-    print(f'output_metadata1: {}', model_metadata.outputs[0])
+    print(f"output_metadata1: {}".format(model_metadata.outputs[0]))
 
     if output_metadata.datatype != "FP32":
         raise Exception("expecting output datatype to be FP32, model '" +
