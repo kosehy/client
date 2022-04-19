@@ -70,7 +70,7 @@ def parse_model(model_metadata, model_config):
     if len(model_metadata.inputs) != 1:
         raise Exception("expecting 1 input, got {}".format(
             len(model_metadata.inputs)))
-    if len(model_metadata.outputs) != 1:
+    if len(model_metadata.outputs) != 2:
         raise Exception("expecting 1 output, got {}".format(
             len(model_metadata.outputs)))
 
@@ -82,6 +82,8 @@ def parse_model(model_metadata, model_config):
     input_metadata = model_metadata.inputs[0]
     input_config = model_config.input[0]
     output_metadata = model_metadata.outputs[0]
+
+    print(f'output_metadata1: {}', model_metadata.outputs[0])
 
     if output_metadata.datatype != "FP32":
         raise Exception("expecting output datatype to be FP32, model '" +
