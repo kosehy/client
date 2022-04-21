@@ -65,6 +65,7 @@ def raise_error_grpc(rpc_error):
 def _get_inference_request(model_name, inputs, model_version, request_id,
                            outputs, sequence_id, sequence_start, sequence_end,
                            priority, timeout):
+    print("before _get_inference_request\n")
     request = service_pb2.ModelInferRequest()
     request.model_name = model_name
     request.model_version = model_version
@@ -1565,7 +1566,7 @@ class InferenceServerClient:
         InferenceServerException
             If server fails to issue inference.
         """
-
+        print("before async_stream_infer\n")
         if self._stream is None:
             raise_error(
                 "stream not available, use start_stream() to make one available."

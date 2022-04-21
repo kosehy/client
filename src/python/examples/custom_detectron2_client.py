@@ -64,14 +64,14 @@ FLAGS = None
 def parse_model(model_metadata, model_config):
     """
     Check the configuration of a model to make sure it meets the
-    requirements for an image classification network (as expected by
+    requirements for an custom detectron2 network (as expected by
     this client)
     """
     if len(model_metadata.inputs) != 1:
         raise Exception("expecting 1 input, got {}".format(
             len(model_metadata.inputs)))
-    if len(model_metadata.outputs) != 3:
-        raise Exception("expecting 3 output, got {}".format(
+    if len(model_metadata.outputs) != 4:
+        raise Exception("expecting 4 outputs, got {}".format(
             len(model_metadata.outputs)))
 
     if len(model_config.input) != 1:
@@ -81,12 +81,27 @@ def parse_model(model_metadata, model_config):
 
     input_metadata = model_metadata.inputs[0]
     input_config = model_config.input[0]
-    output_metadata = model_metadata.outputs[0]
+    output_metadata = []
+    output_metadata.append(model_metadata.outputs[0])
+    output_metadata.append(model_metadata.outputs[1])
+    output_metadata.append(model_metadata.outputs[2])
 
-    if output_metadata.datatype != "FP32":
+    print(f"output_metadata[0]: {output_metadata[0]}\n")
+    print(f"output_metadata[1]: {output_metadata[1]}\n")
+    print(f"output_metadata[2]: {output_metadata[2]}\n")
+
+    if output_metadata[0].datatype != "FP32":
         raise Exception("expecting output datatype to be FP32, model '" +
                         model_metadata.name + "' output type is " +
-                        output_metadata.datatype)
+                        output_metadata[0].datatype)
+    elif output_metadata[1].datatype != "INT64":
+        raise Exception("expecting output datatype to be INT64, model '" +
+                        model_metadata.name + "' output type is " +
+                        output_metadata[1].datatype)
+    elif output_metadata[2].datatype != "FP32":
+        raise Exception("expecting output datatype to be FP32, model '" +
+                        model_metadata.name + "' output type is " +
+                        output_metadata[2].datatype)
 
     # Output is expected to be a vector. But allow any number of
     # dimensions as long as all but 1 is size 1 (e.g. { 10 }, { 1, 10
@@ -94,13 +109,28 @@ def parse_model(model_metadata, model_config):
     # is one.
     output_batch_dim = (model_config.max_batch_size > 0)
     non_one_cnt = 0
-    for dim in output_metadata.shape:
+    for dim in output_metadata[0].shape:
         if output_batch_dim:
             output_batch_dim = False
         elif dim > 1:
             non_one_cnt += 1
             if non_one_cnt > 1:
                 raise Exception("expecting model output to be a vector")
+
+    non_one_cnt = 0
+    for dim in output_metadata[1].shape:
+        if dim > 1:
+            non_one_cnt += 1
+            if non_one_cnt > 1:
+                raise Exception("expecting model output to be a vector")
+
+    non_one_cnt = 0
+    for dim in output_metadata[2].shape:
+        if dim > 1:
+            non_one_cnt += 1
+            if non_one_cnt > 1:
+                raise Exception("expecting model output to be a vector")
+
 
     # Model input must have 3 dims, either CHW or HWC (not counting
     # the batch dimension), either CHW or HWC
@@ -135,7 +165,7 @@ def parse_model(model_metadata, model_config):
         w = input_metadata.shape[3 if input_batch_dim else 2]
 
     return (model_config.max_batch_size, input_metadata.name,
-            output_metadata.name, c, h, w, input_config.format,
+            output_metadata, c, h, w, input_config.format,
             input_metadata.datatype)
 
 
@@ -204,6 +234,7 @@ def postprocess(results, output_name, batch_size, batching):
 
 
 def requestGenerator(batched_image_data, input_name, output_name, dtype, FLAGS):
+    print("requestGenerator\n")
     protocol = FLAGS.protocol.lower()
 
     if protocol == "grpc":
@@ -215,14 +246,19 @@ def requestGenerator(batched_image_data, input_name, output_name, dtype, FLAGS):
     inputs = [client.InferInput(input_name, batched_image_data.shape, dtype)]
     inputs[0].set_data_from_numpy(batched_image_data)
 
-    outputs = [
-        client.InferRequestedOutput(output_name, class_count=FLAGS.classes)
-    ]
+    outputs = []
+    outputs.append(client.InferRequestedOutput(output_name[0].name, class_count=FLAGS.classes))
+    outputs.append(client.InferRequestedOutput(output_name[1].name, class_count=FLAGS.classes))
+    outputs.append(client.InferRequestedOutput(output_name[2].name, class_count=FLAGS.classes))
+
+    print(f"client.InferRequestedOutput builtin functions: {dir(outputs[0])}\n")
+    print(f"outputs[0]: {outputs[0]}\n")
 
     yield inputs, outputs, FLAGS.model_name, FLAGS.model_version
 
 
 def convert_http_metadata_config(_metadata, _config):
+    print("convert_http_metadata_config\n")
     _model_metadata = AttrDict(_metadata)
     _model_config = AttrDict(_config)
 
@@ -305,6 +341,7 @@ if __name__ == '__main__':
     if FLAGS.streaming and FLAGS.protocol.lower() != "grpc":
         raise Exception("Streaming is only allowed with gRPC protocol")
 
+    print(f"FLAGS.protocool: {FLAGS.protocol}\n")
     try:
         if FLAGS.protocol.lower() == "grpc":
             # Create gRPC client for communicating with the server
@@ -344,7 +381,7 @@ if __name__ == '__main__':
 
     max_batch_size, input_name, output_name, c, h, w, format, dtype = parse_model(
         model_metadata, model_config)
-    print("before print filenames")
+
     filenames = []
     if os.path.isdir(FLAGS.image_filename):
         filenames = [
@@ -356,12 +393,11 @@ if __name__ == '__main__':
         filenames = [
             FLAGS.image_filename,
         ]
-    print("before sort filenames")
+
     filenames.sort()
-    print(f"print filenames: {filenames}")
+
     # Preprocess the images into input data according to model
     # requirements
-    print("before preprocess images")
     image_data = []
     for filename in filenames:
         img = Image.open(filename)
@@ -403,20 +439,24 @@ if __name__ == '__main__':
             batched_image_data = np.stack(repeated_image_data, axis=0)
         else:
             batched_image_data = repeated_image_data[0]
-        print("send request")
+
         # Send request
         try:
             for inputs, outputs, model_name, model_version in requestGenerator(
                     batched_image_data, input_name, output_name, dtype, FLAGS):
                 sent_count += 1
+                print("before check FLAGS.streaing, grpc, and http\n")
+                print("FLAGS.streaing\n")
                 if FLAGS.streaming:
+                    print("before start async_stream_infer\n")
                     triton_client.async_stream_infer(
                         FLAGS.model_name,
                         inputs,
                         request_id=str(sent_count),
                         model_version=FLAGS.model_version,
-                        outputs=outputs)
+                        outputs=outputs)")
                 elif FLAGS.async_set:
+                    print("FLAGS.grpc\n")
                     if FLAGS.protocol.lower() == "grpc":
                         triton_client.async_infer(
                             FLAGS.model_name,
@@ -434,13 +474,17 @@ if __name__ == '__main__':
                                 model_version=FLAGS.model_version,
                                 outputs=outputs))
                 else:
+                    print("FLAGS.http\n")
+                    print("else before append responses")
                     responses.append(
                         triton_client.infer(FLAGS.model_name,
                                             inputs,
                                             request_id=str(sent_count),
                                             model_version=FLAGS.model_version,
                                             outputs=outputs))
+                    print("after append responses")
 
+            print("after requestGenerator\n")
         except InferenceServerException as e:
             print("inference failed: " + str(e))
             if FLAGS.streaming:
@@ -466,13 +510,18 @@ if __name__ == '__main__':
             # for HTTP Async requests.
             for async_request in async_requests:
                 responses.append(async_request.get_result())
-
+    print("before check response in responses\n")
+    print(f"responses: {responses}\n")
     for response in responses:
+        print("during check response in responses\n")
         if FLAGS.protocol.lower() == "grpc":
+            print("before check this_id\n")
             this_id = response.get_response().id
         else:
+            print("before check this_id\n")
             this_id = response.get_response()["id"]
+        print(f"this_id: {this_id}\n")
         print("Request {}, batch size {}".format(this_id, FLAGS.batch_size))
-        postprocess(response, output_name, FLAGS.batch_size, max_batch_size > 0)
+        postprocess(response, output_name[0].name, FLAGS.batch_size, max_batch_size > 0)
 
     print("PASS")

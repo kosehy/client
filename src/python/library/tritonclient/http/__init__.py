@@ -1319,7 +1319,7 @@ class InferenceServerClient:
         InferenceServerException
             If server fails to perform inference.
         """
-
+        print("before start http infer()\n")
         request_body, json_size = _get_inference_request(
             inputs=inputs,
             request_id=request_id,
